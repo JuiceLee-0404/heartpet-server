@@ -1,19 +1,19 @@
-from socketio import Server
+# server.py  —— Render 兼容版（Python 3.11，无 eventlet）
+import asyncio
 import socketio
+from aiohttp import web
 
-sio = Server(cors_allowed_origins='*')
+sio = socketio.AsyncServer(cors_allowed_origins='*', async_mode='aiohttp')
+app = web.Application()
+sio.attach(app)
 
 @sio.event
-def connect(sid, environ):
+async def connect(sid, environ):
     print("connect", sid)
 
 @sio.event
-def dog_action(sid, data):
-    sio.emit('dog_action', data, skip_sid=sid)
+async def dog_action(sid, data):
+    await sio.emit('dog_action', data, skip_sid=sid)
 
 if __name__ == '__main__':
-    # 纯 Socket.IO，不依赖 eventlet.wsgi
-    import eventlet
-    eventlet.monkey_patch()
-    eventlet.listen(('', 5000))
-    eventlet.wsgi.server(eventlet.listen(('', 5000)), sio)
+    web.run_app(app, host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
