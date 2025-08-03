@@ -1,9 +1,7 @@
-# server.py  —— Render 兼容版
 from socketio import Server
-import eventlet
-import eventlet.wsgi
+import socketio
 
-sio = Server(cors_allowed_origins='*')   # 去掉 async_mode
+sio = Server(cors_allowed_origins='*')
 
 @sio.event
 def connect(sid, environ):
@@ -14,4 +12,8 @@ def dog_action(sid, data):
     sio.emit('dog_action', data, skip_sid=sid)
 
 if __name__ == '__main__':
-    app = eventlet.wsgi.server(eventlet.listen(('', 5000)), sio)
+    # 纯 Socket.IO，不依赖 eventlet.wsgi
+    import eventlet
+    eventlet.monkey_patch()
+    eventlet.listen(('', 5000))
+    eventlet.wsgi.server(eventlet.listen(('', 5000)), sio)
