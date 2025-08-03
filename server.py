@@ -1,4 +1,4 @@
-# server.py  —— Render 兼容版（Python 3.11，无 eventlet）
+# server.py
 import asyncio
 import socketio
 from aiohttp import web
@@ -17,3 +17,4 @@ async def dog_action(sid, data):
 
 if __name__ == '__main__':
     web.run_app(app, host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+    
