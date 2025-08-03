@@ -1,2 +1,2 @@
-python-socketio[client]>=5.9
-aiohttp>=3.8
+eventlet==0.33.3
+python-socketio==5.13.0
