@@ -114,12 +114,14 @@ class FriendSearchDialog(QDialog):
             return
             
         try:
-            # 这里应该调用网络管理器搜索用户
-            # 暂时模拟搜索结果
-            if user_id.startswith("U"):
+            # 调用网络管理器搜索用户
+            search_result = self.network_manager.search_user(user_id)
+            
+            if search_result and search_result.get('found', False):
+                user_data = search_result.get('user', {})
                 self.current_user = {
-                    'user_id': user_id,
-                    'user_name': f"用户{user_id[-4:]}"
+                    'user_id': user_data.get('user_id', user_id),
+                    'user_name': user_data.get('user_name', user_id)
                 }
                 self.result_label.setText(f"找到用户: {self.current_user['user_name']} ({user_id})")
                 self.send_request_button.setEnabled(True)
@@ -160,18 +162,20 @@ class FriendSearchDialog(QDialog):
     def refresh_friends_list(self):
         """刷新好友列表"""
         try:
-            # 这里应该从网络管理器获取好友列表
-            # 暂时显示模拟数据
+            # 从网络管理器获取真实好友列表
             self.friends_list.clear()
             
-            # 模拟好友列表
-            friends = [
-                {"user_id": "U12345678", "user_name": "小明"},
-                {"user_id": "U87654321", "user_name": "小红"}
-            ]
-            
-            for friend in friends:
-                item = QListWidgetItem(f"{friend['user_name']} ({friend['user_id']})")
+            friends = self.network_manager.get_friends_list()
+            if friends:
+                for friend in friends:
+                    # 服务器返回的是 user_id 和 user_name，需要适配
+                    friend_name = friend.get('user_name', friend.get('name', '未知用户'))
+                    friend_id = friend.get('user_id', friend.get('id', '未知ID'))
+                    item = QListWidgetItem(f"{friend_name} ({friend_id})")
+                    self.friends_list.addItem(item)
+            else:
+                item = QListWidgetItem("暂无好友")
+                item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
                 self.friends_list.addItem(item)
                 
         except Exception as e:
