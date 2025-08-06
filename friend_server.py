@@ -500,8 +500,17 @@ def send_message():
         'timestamp': time.time()
     }
     
+    # 如果是宠物动作，只发送给情侣伴侣
+    if message_type == 'pet_action':
+        if user_id in couples:
+            partner_id = couples[user_id]
+            if partner_id in users:
+                messages[partner_id].append(message_data)
+                print(f"DEBUG: 宠物动作发送给情侣伴侣 {partner_id}")
+        else:
+            print(f"DEBUG: 用户 {user_id} 没有情侣伴侣，无法发送宠物动作")
     # 如果有目标用户，发送给目标用户
-    if target_user_id and target_user_id in users:
+    elif target_user_id and target_user_id in users:
         messages[target_user_id].append(message_data)
     else:
         # 否则发送给所有好友
