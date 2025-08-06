@@ -142,15 +142,17 @@ class FriendSearchDialog(QDialog):
             message = "我想和你成为好友"
             
         try:
-            # 发送好友申请
+            # 发送好友申请信号，不在这里显示成功提示
             self.friend_request_sent.emit(self.current_user['user_id'], message)
-            QMessageBox.information(self, "申请发送", f"已向 {self.current_user['user_name']} 发送好友申请")
             
             # 清空搜索
             self.search_edit.clear()
             self.result_label.setText("输入用户ID进行搜索")
             self.send_request_button.setEnabled(False)
             self.current_user = None
+            
+            # 关闭对话框
+            self.accept()
             
         except Exception as e:
             QMessageBox.warning(self, "发送失败", f"发送好友申请时出错: {e}")
