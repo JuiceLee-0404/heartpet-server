@@ -1,276 +1,481 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-好友网络管理器 - 支持用户注册和好友申请
+好友网络管理器 - 最终修复版本
+包含好友申请、情侣配对等所有功能
 """
 
-import json
 import requests
 import threading
 import time
-from typing import Optional, Callable
 from PyQt5.QtCore import QObject, pyqtSignal
 
 class FriendNetworkManager(QObject):
-    """好友网络管理器"""
+    """好友网络管理器 - 最终修复版本"""
     
     # 信号定义
     registration_status_changed = pyqtSignal(bool)  # 注册状态改变
-    friend_request_received = pyqtSignal(str, str, str)  # 收到好友申请 (from_user_id, from_user_name, message)
+    login_status_changed = pyqtSignal(bool)  # 登录状态改变
+    friend_request_received = pyqtSignal(str, str, str)  # 好友申请 (from_user_id, from_user_name, message)
+    couple_request_received = pyqtSignal(str, str, str)  # 情侣申请 (from_user_id, from_user_name, message)
     friend_status_changed = pyqtSignal(str, bool)  # 好友状态改变 (friend_id, online)
-    pet_action_received = pyqtSignal(int, str, str)  # 接收到宠物动作 (pet_id, action_type, action_data)
+    couple_status_changed = pyqtSignal(str, bool)  # 情侣状态改变 (partner_id, online)
+    pet_action_received = pyqtSignal(int, str, str)  # 宠物动作 (pet_id, action_type, action_data)
     
-    def __init__(self):
+    def __init__(self, server_url="https://lovepetty-friend-server.onrender.com"):
         super().__init__()
-        self.registered = False
+        self.server_url = server_url
         self.user_id = None
         self.user_name = None
-        self.server_url = "https://lovepetty.onrender.com"  # 部署在Render的服务器
+        self.registered = False
+        self.logged_in = False
+        self.last_message_timestamp = 0
         self.polling_thread = None
         self.running = False
-        self.friends = {}  # 好友列表
         
     def register_user(self, user_id: str, user_name: str) -> bool:
         """注册用户"""
         try:
-            response = requests.post(f"{self.server_url}/register_user", json={
-                'user_id': user_id,
-                'user_name': user_name,
-                'timestamp': time.time()
-            }, timeout=10)
+            response = requests.post(f"{self.server_url}/register_user", 
+                                   json={
+                                       'user_id': user_id,
+                                       'user_name': user_name
+                                   }, timeout=10)
             
             if response.status_code == 200:
-                data = response.json()
                 self.user_id = user_id
                 self.user_name = user_name
                 self.registered = True
-                self.registration_status_changed.emit(True)
-                
-                # 启动轮询线程
+                self.logged_in = True
                 self.start_polling()
-                
-                print(f"用户注册成功: {user_id}")
+                self.registration_status_changed.emit(True)
                 return True
             else:
-                print(f"用户注册失败: {response.text}")
+                print(f"注册失败: {response.text}")
+                self.registration_status_changed.emit(False)
                 return False
                 
         except Exception as e:
-            print(f"注册错误: {e}")
+            print(f"注册异常: {e}")
+            self.registration_status_changed.emit(False)
             return False
             
-    def search_user(self, target_user_id: str) -> Optional[dict]:
-        """搜索用户"""
+    def login_user(self, user_id: str, user_name: str) -> bool:
+        """用户登录"""
         try:
-            response = requests.get(f"{self.server_url}/search_user", params={
-                'user_id': target_user_id
-            }, timeout=10)
+            response = requests.post(f"{self.server_url}/login_user", 
+                                   json={
+                                       'user_id': user_id,
+                                       'user_name': user_name
+                                   }, timeout=10)
             
             if response.status_code == 200:
-                data = response.json()
-                return data.get('user')
+                self.user_id = user_id
+                self.user_name = user_name
+                self.logged_in = True
+                self.start_polling()
+                self.login_status_changed.emit(True)
+                return True
+            else:
+                print(f"登录失败: {response.text}")
+                self.login_status_changed.emit(False)
+                return False
+                
+        except Exception as e:
+            print(f"登录异常: {e}")
+            self.login_status_changed.emit(False)
+            return False
+    
+    def search_user(self, user_id: str) -> dict:
+        """搜索用户"""
+        try:
+            response = requests.get(f"{self.server_url}/search_user", 
+                                  params={'user_id': user_id}, timeout=10)
+            
+            if response.status_code == 200:
+                return response.json()
             else:
                 print(f"搜索用户失败: {response.text}")
                 return None
                 
         except Exception as e:
-            print(f"搜索用户错误: {e}")
+            print(f"搜索用户异常: {e}")
             return None
-            
-    def send_friend_request(self, target_user_id: str, message: str) -> bool:
+    
+    def send_friend_request(self, target_user_id: str, message: str = "我想和你成为好友") -> bool:
         """发送好友申请"""
+        if not self.user_id or not self.user_name:
+            return False
+            
         try:
-            response = requests.post(f"{self.server_url}/send_friend_request", json={
-                'from_user_id': self.user_id,
-                'from_user_name': self.user_name,
-                'to_user_id': target_user_id,
-                'message': message,
-                'timestamp': time.time()
-            }, timeout=10)
+            response = requests.post(f"{self.server_url}/send_friend_request", 
+                                   json={
+                                       'from_user_id': self.user_id,
+                                       'from_user_name': self.user_name,
+                                       'to_user_id': target_user_id,
+                                       'message': message
+                                   }, timeout=10)
             
             if response.status_code == 200:
                 print(f"好友申请发送成功: {target_user_id}")
                 return True
             else:
-                print(f"好友申请发送失败: {response.text}")
+                print(f"发送好友申请失败: {response.text}")
                 return False
                 
         except Exception as e:
-            print(f"发送好友申请错误: {e}")
+            print(f"发送好友申请异常: {e}")
+            return False
+    
+    def send_couple_request(self, target_user_id: str, message: str = "我想和你成为情侣") -> bool:
+        """发送情侣申请"""
+        if not self.user_id or not self.user_name:
             return False
             
-    def accept_friend_request(self, from_user_id: str) -> bool:
-        """接受好友申请"""
         try:
-            response = requests.post(f"{self.server_url}/accept_friend_request", json={
-                'from_user_id': from_user_id,
-                'to_user_id': self.user_id,
-                'timestamp': time.time()
-            }, timeout=10)
+            response = requests.post(f"{self.server_url}/send_couple_request", 
+                                   json={
+                                       'from_user_id': self.user_id,
+                                       'from_user_name': self.user_name,
+                                       'to_user_id': target_user_id,
+                                       'message': message
+                                   }, timeout=10)
             
             if response.status_code == 200:
-                print(f"接受好友申请成功: {from_user_id}")
+                print(f"情侣申请发送成功: {target_user_id}")
                 return True
             else:
-                print(f"接受好友申请失败: {response.text}")
+                print(f"发送情侣申请失败: {response.text}")
                 return False
                 
         except Exception as e:
-            print(f"接受好友申请错误: {e}")
+            print(f"发送情侣申请异常: {e}")
+            return False
+    
+    def accept_friend_request(self, from_user_id: str) -> bool:
+        """接受好友申请 - 最终修复版本"""
+        if not self.user_id:
+            print("❌ 用户ID为空，无法接受好友申请")
             return False
             
+        try:
+            # 尝试多种数据格式
+            request_formats = [
+                # 格式1: 标准格式
+                {
+                    'user_id': self.user_id,
+                    'from_user_id': from_user_id
+                },
+                # 格式2: 字符串格式
+                {
+                    'user_id': str(self.user_id),
+                    'from_user_id': str(from_user_id)
+                },
+                # 格式3: 添加额外字段
+                {
+                    'user_id': self.user_id,
+                    'from_user_id': from_user_id,
+                    'timestamp': time.time()
+                }
+            ]
+            
+            for i, request_data in enumerate(request_formats):
+                print(f"🔍 尝试格式 {i+1}: {request_data}")
+                
+                response = requests.post(f"{self.server_url}/accept_friend_request", 
+                                       json=request_data, timeout=10)
+                
+                print(f"📡 格式 {i+1} 响应:")
+                print(f"   状态码: {response.status_code}")
+                print(f"   响应内容: {response.text}")
+                
+                if response.status_code == 200:
+                    print(f"✅ 好友申请接受成功: {from_user_id}")
+                    return True
+                elif response.status_code == 404 and "未找到好友申请" in response.text:
+                    print(f"⚠️ 未找到好友申请，可能申请已被处理")
+                    return False
+                else:
+                    print(f"❌ 格式 {i+1} 失败: {response.text}")
+                    continue
+            
+            print(f"❌ 所有格式都失败了")
+            return False
+                
+        except Exception as e:
+            print(f"❌ 接受好友申请异常: {e}")
+            return False
+    
+    def accept_couple_request(self, from_user_id: str) -> bool:
+        """接受情侣申请 - 最终修复版本"""
+        if not self.user_id:
+            print("❌ 用户ID为空，无法接受情侣申请")
+            return False
+            
+        try:
+            # 尝试多种数据格式
+            request_formats = [
+                # 格式1: 标准格式
+                {
+                    'user_id': self.user_id,
+                    'from_user_id': from_user_id
+                },
+                # 格式2: 字符串格式
+                {
+                    'user_id': str(self.user_id),
+                    'from_user_id': str(from_user_id)
+                },
+                # 格式3: 添加额外字段
+                {
+                    'user_id': self.user_id,
+                    'from_user_id': from_user_id,
+                    'timestamp': time.time()
+                }
+            ]
+            
+            for i, request_data in enumerate(request_formats):
+                print(f"🔍 尝试情侣申请格式 {i+1}: {request_data}")
+                
+                response = requests.post(f"{self.server_url}/accept_couple_request", 
+                                       json=request_data, timeout=10)
+                
+                print(f"📡 情侣申请格式 {i+1} 响应:")
+                print(f"   状态码: {response.status_code}")
+                print(f"   响应内容: {response.text}")
+                
+                if response.status_code == 200:
+                    print(f"✅ 情侣申请接受成功: {from_user_id}")
+                    return True
+                elif response.status_code == 404 and "未找到情侣申请" in response.text:
+                    print(f"⚠️ 未找到情侣申请，可能申请已被处理")
+                    return False
+                else:
+                    print(f"❌ 情侣申请格式 {i+1} 失败: {response.text}")
+                    continue
+            
+            print(f"❌ 所有情侣申请格式都失败了")
+            return False
+                
+        except Exception as e:
+            print(f"❌ 接受情侣申请异常: {e}")
+            return False
+    
+    def reject_couple_request(self, from_user_id: str) -> bool:
+        """拒绝情侣申请 - 最终修复版本"""
+        if not self.user_id:
+            print("❌ 用户ID为空，无法拒绝情侣申请")
+            return False
+            
+        try:
+            # 尝试多种数据格式
+            request_formats = [
+                # 格式1: 标准格式
+                {
+                    'user_id': self.user_id,
+                    'from_user_id': from_user_id
+                },
+                # 格式2: 字符串格式
+                {
+                    'user_id': str(self.user_id),
+                    'from_user_id': str(from_user_id)
+                },
+                # 格式3: 添加额外字段
+                {
+                    'user_id': self.user_id,
+                    'from_user_id': from_user_id,
+                    'timestamp': time.time()
+                }
+            ]
+            
+            for i, request_data in enumerate(request_formats):
+                print(f"🔍 尝试拒绝情侣申请格式 {i+1}: {request_data}")
+                
+                response = requests.post(f"{self.server_url}/reject_couple_request", 
+                                       json=request_data, timeout=10)
+                
+                print(f"📡 拒绝情侣申请格式 {i+1} 响应:")
+                print(f"   状态码: {response.status_code}")
+                print(f"   响应内容: {response.text}")
+                
+                if response.status_code == 200:
+                    print(f"✅ 情侣申请拒绝成功: {from_user_id}")
+                    return True
+                elif response.status_code == 404 and "未找到情侣申请" in response.text:
+                    print(f"⚠️ 未找到情侣申请，可能申请已被处理")
+                    return False
+                else:
+                    print(f"❌ 拒绝情侣申请格式 {i+1} 失败: {response.text}")
+                    continue
+            
+            print(f"❌ 所有拒绝情侣申请格式都失败了")
+            return False
+                
+        except Exception as e:
+            print(f"❌ 拒绝情侣申请异常: {e}")
+            return False
+    
     def get_friends_list(self) -> list:
         """获取好友列表"""
+        if not self.user_id:
+            return []
+            
         try:
-            response = requests.get(f"{self.server_url}/friends", params={
-                'user_id': self.user_id
-            }, timeout=10)
+            response = requests.get(f"{self.server_url}/friends", 
+                                  params={'user_id': self.user_id}, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
-                friends = data.get('friends', [])
-                self.friends = {f['user_id']: f for f in friends}
-                return friends
+                return data.get('friends', [])
             else:
                 print(f"获取好友列表失败: {response.text}")
                 return []
                 
         except Exception as e:
-            print(f"获取好友列表错误: {e}")
+            print(f"获取好友列表异常: {e}")
+            return []
+    
+    def get_couple_status(self) -> dict:
+        """获取情侣状态"""
+        if not self.user_id:
+            return {'has_couple': False}
+            
+        try:
+            response = requests.get(f"{self.server_url}/couple_status", 
+                                  params={'user_id': self.user_id}, timeout=10)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"获取情侣状态失败: {response.text}")
+                return {'has_couple': False}
+                
+        except Exception as e:
+            print(f"获取情侣状态异常: {e}")
+            return {'has_couple': False}
+    
+    def get_couple_requests(self) -> list:
+        """获取情侣申请列表"""
+        if not self.user_id:
             return []
             
-    def start_polling(self):
-        """启动轮询线程"""
-        self.running = True
-        self.polling_thread = threading.Thread(target=self._polling_loop, daemon=True)
-        self.polling_thread.start()
-        
-    def _polling_loop(self):
-        """轮询循环"""
-        while self.running and self.registered:
-            try:
-                # 获取新消息
-                response = requests.get(f"{self.server_url}/messages", params={
-                    'user_id': self.user_id,
-                    'timestamp': time.time()
-                }, timeout=5)
-                
-                if response.status_code == 200:
-                    messages = response.json().get('messages', [])
-                    for message in messages:
-                        self._process_message(message)
-                        
-                # 检查好友在线状态
-                self._check_friends_status()
-                
-                time.sleep(2)  # 每2秒轮询一次
-                
-            except Exception as e:
-                if self.running:
-                    print(f"轮询错误: {e}")
-                    time.sleep(5)  # 出错时等待更长时间
-                    
-    def _process_message(self, message: dict):
-        """处理接收到的消息"""
-        message_type = message.get('type')
-        
-        if message_type == 'friend_request':
-            from_user_id = message.get('from_user_id')
-            from_user_name = message.get('from_user_name')
-            request_message = message.get('message')
-            
-            if from_user_id and from_user_name:
-                self.friend_request_received.emit(from_user_id, from_user_name, request_message)
-                
-        elif message_type == 'pet_action':
-            pet_id = message.get('pet_id')
-            action_type = message.get('action_type')
-            action_data = message.get('action_data')
-            
-            if pet_id and action_type and action_data:
-                self.pet_action_received.emit(pet_id, action_type, action_data)
-                
-        elif message_type == 'heartbeat':
-            # 心跳包，保持连接
-            pass
-            
-    def _check_friends_status(self):
-        """检查好友在线状态"""
         try:
-            response = requests.get(f"{self.server_url}/friends_status", params={
-                'user_id': self.user_id
-            }, timeout=5)
+            response = requests.get(f"{self.server_url}/couple_requests", 
+                                  params={'user_id': self.user_id}, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
-                friends_status = data.get('friends_status', {})
+                return data.get('requests', [])
+            else:
+                print(f"获取情侣申请失败: {response.text}")
+                return []
                 
-                for friend_id, online in friends_status.items():
-                    self.friend_status_changed.emit(friend_id, online)
-                    
         except Exception as e:
-            print(f"检查好友状态错误: {e}")
+            print(f"获取情侣申请异常: {e}")
+            return []
+    
+    def get_friend_requests(self) -> list:
+        """获取好友申请列表"""
+        if not self.user_id:
+            return []
             
-    def send_pet_action(self, pet_id: int, action_type: str, action_data: str, target_user_id: str = None):
+        try:
+            response = requests.get(f"{self.server_url}/friend_requests", 
+                                  params={'user_id': self.user_id}, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('requests', [])
+            else:
+                print(f"获取好友申请失败: {response.text}")
+                return []
+                
+        except Exception as e:
+            print(f"获取好友申请异常: {e}")
+            return []
+    
+    def get_user_id(self) -> str:
+        """获取用户ID"""
+        return self.user_id
+    
+    def get_user_name(self) -> str:
+        """获取用户名称"""
+        return self.user_name
+    
+    def send_pet_action(self, pet_id: int, action_type: str, action_data: str):
         """发送宠物动作"""
-        if not self.registered:
+        if not self.user_id:
             return
             
         try:
-            payload = {
-                'user_id': self.user_id,
-                'user_name': self.user_name,
-                'type': 'pet_action',
-                'pet_id': pet_id,
-                'action_type': action_type,
-                'action_data': action_data,
-                'timestamp': time.time()
-            }
-            
-            if target_user_id:
-                payload['target_user_id'] = target_user_id
-                
-            response = requests.post(f"{self.server_url}/send", json=payload, timeout=5)
+            response = requests.post(f"{self.server_url}/send", 
+                                   json={
+                                       'user_id': self.user_id,
+                                       'type': 'pet_action',
+                                       'message': f"{pet_id}:{action_type}:{action_data}"
+                                   }, timeout=10)
             
             if response.status_code != 200:
-                print(f"发送消息失败: {response.text}")
+                print(f"发送宠物动作失败: {response.text}")
                 
         except Exception as e:
-            print(f"发送消息错误: {e}")
+            print(f"发送宠物动作异常: {e}")
+    
+    def start_polling(self):
+        """开始轮询"""
+        if self.polling_thread is None or not self.polling_thread.is_alive():
+            self.running = True
+            self.polling_thread = threading.Thread(target=self._polling_loop)
+            self.polling_thread.daemon = True
+            self.polling_thread.start()
+    
+    def _polling_loop(self):
+        """轮询循环"""
+        while self.running and self.user_id:
+            try:
+                # 获取新消息
+                response = requests.get(f"{self.server_url}/messages", 
+                                      params={
+                                          'user_id': self.user_id,
+                                          'timestamp': self.last_message_timestamp
+                                      }, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    messages = data.get('messages', [])
+                    
+                    for message in messages:
+                        self.last_message_timestamp = max(self.last_message_timestamp, message['timestamp'])
+                        
+                        if message['type'] == 'friend_request':
+                            self.friend_request_received.emit(
+                                message['from_user_id'],
+                                message['from_user_name'],
+                                message['message']
+                            )
+                        elif message['type'] == 'couple_request':
+                            self.couple_request_received.emit(
+                                message['from_user_id'],
+                                message['from_user_name'],
+                                message['message']
+                            )
+                        elif message['type'] == 'friend_accepted':
+                            print(f"✅ 收到好友申请接受通知: {message['from_user_name']}")
+                        elif message['type'] == 'couple_accepted':
+                            print(f"💕 收到情侣申请接受通知: {message['from_user_name']}")
+                        elif message['type'] == 'couple_rejected':
+                            print(f"💔 收到情侣申请拒绝通知: {message['from_user_name']}")
+                
+                # 心跳包
+                requests.post(f"{self.server_url}/heartbeat", 
+                             json={'user_id': self.user_id}, timeout=5)
+                
+            except Exception as e:
+                print(f"轮询异常: {e}")
             
-    def send_heartbeat(self):
-        """发送心跳包"""
-        if not self.registered:
-            return
-            
-        try:
-            requests.post(f"{self.server_url}/heartbeat", json={
-                'user_id': self.user_id,
-                'timestamp': time.time()
-            }, timeout=5)
-            
-        except Exception as e:
-            print(f"心跳包发送错误: {e}")
-            
-    def is_registered(self) -> bool:
-        """检查是否已注册"""
-        return self.registered
-        
+            time.sleep(5)  # 5秒轮询一次
+    
     def disconnect(self):
         """断开连接"""
         self.running = False
-        self.registered = False
-        
-        if self.polling_thread:
-            self.polling_thread.join(timeout=1)
-            
-        self.registration_status_changed.emit(False)
-        print("已断开连接")
-        
-    def get_user_id(self) -> Optional[str]:
-        """获取用户ID"""
-        return self.user_id
-        
-    def get_user_name(self) -> Optional[str]:
-        """获取用户名"""
-        return self.user_name 
+        if self.polling_thread and self.polling_thread.is_alive():
+            self.polling_thread.join(timeout=1) 
