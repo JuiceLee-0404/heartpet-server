@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-好友系统服务器 - 完整修复版本
+好友系统服务器 - 最终完整修复版本
 包含好友申请、情侣配对等所有功能
 """
 
@@ -197,7 +197,7 @@ def send_couple_request():
 
 @app.route('/accept_friend_request', methods=['POST'])
 def accept_friend_request():
-    """接受好友申请 - 修复版本"""
+    """接受好友申请 - 最终修复版本"""
     data = request.json
     print(f"DEBUG: 接收到的数据: {data}")
     
@@ -261,7 +261,7 @@ def accept_friend_request():
 
 @app.route('/accept_couple_request', methods=['POST'])
 def accept_couple_request():
-    """接受情侣申请 - 修复版本"""
+    """接受情侣申请 - 最终修复版本"""
     data = request.json
     print(f"DEBUG: 接收到的情侣申请数据: {data}")
     
@@ -325,7 +325,7 @@ def accept_couple_request():
 
 @app.route('/reject_couple_request', methods=['POST'])
 def reject_couple_request():
-    """拒绝情侣申请 - 修复版本"""
+    """拒绝情侣申请 - 最终修复版本"""
     data = request.json
     print(f"DEBUG: 接收到的拒绝情侣申请数据: {data}")
     
