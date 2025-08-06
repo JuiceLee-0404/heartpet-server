@@ -464,6 +464,20 @@ class FriendNetworkManager(QObject):
                             print(f"💕 收到情侣申请接受通知: {message['from_user_name']}")
                         elif message['type'] == 'couple_rejected':
                             print(f"💔 收到情侣申请拒绝通知: {message['from_user_name']}")
+                        elif message['type'] == 'pet_action':
+                            # 解析宠物动作消息
+                            try:
+                                pet_action_data = message['message'].split(':')
+                                if len(pet_action_data) == 3:
+                                    pet_id = int(pet_action_data[0])
+                                    action_type = pet_action_data[1]
+                                    action_data = pet_action_data[2]
+                                    print(f"🐕 收到宠物动作: pet_id={pet_id}, type={action_type}, data={action_data}")
+                                    self.pet_action_received.emit(pet_id, action_type, action_data)
+                                else:
+                                    print(f"⚠️ 宠物动作消息格式错误: {message['message']}")
+                            except Exception as e:
+                                print(f"❌ 解析宠物动作消息失败: {e}")
                 
                 # 心跳包
                 requests.post(f"{self.server_url}/heartbeat", 
