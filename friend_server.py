@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-好友系统服务器 - 支持用户注册和好友申请
+好友系统服务器 - 完整修复版本
+包含好友申请、情侣配对等所有功能
 """
 
 from flask import Flask, request, jsonify
@@ -16,7 +17,9 @@ app = Flask(__name__)
 # 存储用户数据
 users = {}  # user_id -> user_data
 friends = defaultdict(set)  # user_id -> set of friend_ids
-friend_requests = defaultdict(list)  # user_id -> list of pending requests
+friend_requests = defaultdict(list)  # user_id -> list of pending friend requests
+couple_requests = defaultdict(list)  # user_id -> list of pending couple requests
+couples = {}  # user_id -> couple_partner_id (双向关系)
 messages = defaultdict(list)  # user_id -> list of messages
 
 @app.route('/register_user', methods=['POST'])
@@ -42,6 +45,35 @@ def register_user():
     
     return jsonify({
         'message': '注册成功',
+        'user_id': user_id
+    })
+
+@app.route('/login_user', methods=['POST'])
+def login_user():
+    """用户登录"""
+    data = request.json
+    user_id = data.get('user_id')
+    user_name = data.get('user_name')
+    
+    if not user_id or not user_name:
+        return jsonify({'error': '缺少必要参数'}), 400
+        
+    # 如果用户不存在，自动注册
+    if user_id not in users:
+        users[user_id] = {
+            'user_id': user_id,
+            'user_name': user_name,
+            'online': True,
+            'last_seen': time.time()
+        }
+        
+    # 更新用户状态
+    users[user_id]['online'] = True
+    users[user_id]['last_seen'] = time.time()
+    users[user_id]['user_name'] = user_name  # 允许更新昵称
+    
+    return jsonify({
+        'message': '登录成功',
         'user_id': user_id
     })
 
@@ -99,51 +131,255 @@ def send_friend_request():
     
     friend_requests[to_user_id].append(friend_request)
     
-    # 添加到消息列表
-    messages[to_user_id].append({
+    # 发送消息通知
+    message_data = {
         'type': 'friend_request',
         'from_user_id': from_user_id,
         'from_user_name': from_user_name,
         'message': message,
         'timestamp': time.time()
-    })
+    }
+    
+    messages[to_user_id].append(message_data)
     
     return jsonify({'message': '好友申请发送成功'})
 
-@app.route('/accept_friend_request', methods=['POST'])
-def accept_friend_request():
-    """接受好友申请"""
+@app.route('/send_couple_request', methods=['POST'])
+def send_couple_request():
+    """发送情侣申请"""
     data = request.json
     from_user_id = data.get('from_user_id')
+    from_user_name = data.get('from_user_name')
     to_user_id = data.get('to_user_id')
+    message = data.get('message', '我想和你成为情侣')
     
-    if not from_user_id or not to_user_id:
+    if not all([from_user_id, from_user_name, to_user_id]):
         return jsonify({'error': '缺少必要参数'}), 400
+        
+    if to_user_id not in users:
+        return jsonify({'error': '目标用户不存在'}), 404
+        
+    if from_user_id == to_user_id:
+        return jsonify({'error': '不能向自己发送情侣申请'}), 400
+        
+    # 检查是否已经是情侣
+    if from_user_id in couples and couples[from_user_id] == to_user_id:
+        return jsonify({'error': '已经是情侣了'}), 400
+        
+    # 检查是否已经发送过申请
+    for request_data in couple_requests[to_user_id]:
+        if request_data['from_user_id'] == from_user_id:
+            return jsonify({'error': '已经发送过情侣申请'}), 400
+    
+    # 创建情侣申请
+    couple_request = {
+        'from_user_id': from_user_id,
+        'from_user_name': from_user_name,
+        'to_user_id': to_user_id,
+        'message': message,
+        'timestamp': time.time()
+    }
+    
+    couple_requests[to_user_id].append(couple_request)
+    
+    # 发送消息通知
+    message_data = {
+        'type': 'couple_request',
+        'from_user_id': from_user_id,
+        'from_user_name': from_user_name,
+        'message': message,
+        'timestamp': time.time()
+    }
+    
+    messages[to_user_id].append(message_data)
+    
+    return jsonify({'message': '情侣申请发送成功'})
+
+@app.route('/accept_friend_request', methods=['POST'])
+def accept_friend_request():
+    """接受好友申请 - 修复版本"""
+    data = request.json
+    print(f"DEBUG: 接收到的数据: {data}")
+    
+    # 检查数据是否为None
+    if data is None:
+        print("DEBUG: 请求数据为空")
+        return jsonify({'error': '请求数据为空'}), 400
+    
+    user_id = data.get('user_id')
+    from_user_id = data.get('from_user_id')
+    
+    print(f"DEBUG: user_id = {user_id}, from_user_id = {from_user_id}")
+    
+    # 修复参数验证 - 使用更宽松的验证
+    if not user_id or not from_user_id:
+        print(f"DEBUG: 参数验证失败 - user_id: '{user_id}', from_user_id: '{from_user_id}'")
+        return jsonify({'error': '缺少必要参数'}), 400
+    
+    # 检查用户是否存在
+    if user_id not in users:
+        print(f"DEBUG: 用户不存在 - {user_id}")
+        return jsonify({'error': '用户不存在'}), 404
+        
+    if from_user_id not in users:
+        print(f"DEBUG: 申请者不存在 - {from_user_id}")
+        return jsonify({'error': '申请者不存在'}), 404
         
     # 查找并移除好友申请
     request_found = False
-    for i, request_data in enumerate(friend_requests[to_user_id]):
-        if request_data['from_user_id'] == from_user_id:
-            friend_requests[to_user_id].pop(i)
-            request_found = True
-            break
-            
+    if user_id in friend_requests:
+        for i, request_data in enumerate(friend_requests[user_id]):
+            if request_data['from_user_id'] == from_user_id:
+                friend_requests[user_id].pop(i)
+                request_found = True
+                print(f"DEBUG: 找到并移除好友申请")
+                break
+                
     if not request_found:
-        return jsonify({'error': '好友申请不存在'}), 404
+        print(f"DEBUG: 未找到好友申请 - user_id: {user_id}, from_user_id: {from_user_id}")
+        print(f"DEBUG: 当前好友申请列表: {friend_requests}")
+        return jsonify({'error': '未找到好友申请'}), 404
         
-    # 添加好友关系
-    friends[from_user_id].add(to_user_id)
-    friends[to_user_id].add(from_user_id)
+    # 建立好友关系
+    friends[user_id].add(from_user_id)
+    friends[from_user_id].add(user_id)
+    print(f"DEBUG: 建立好友关系成功")
     
-    # 发送通知消息
-    messages[from_user_id].append({
+    # 发送接受通知
+    message_data = {
         'type': 'friend_accepted',
-        'from_user_id': to_user_id,
-        'message': f'用户 {to_user_id} 接受了你的好友申请',
+        'from_user_id': user_id,
+        'from_user_name': users[user_id]['user_name'],
+        'message': '已接受你的好友申请',
         'timestamp': time.time()
-    })
+    }
+    
+    messages[from_user_id].append(message_data)
+    print(f"DEBUG: 发送接受通知成功")
     
     return jsonify({'message': '好友申请接受成功'})
+
+@app.route('/accept_couple_request', methods=['POST'])
+def accept_couple_request():
+    """接受情侣申请 - 修复版本"""
+    data = request.json
+    print(f"DEBUG: 接收到的情侣申请数据: {data}")
+    
+    # 检查数据是否为None
+    if data is None:
+        print("DEBUG: 请求数据为空")
+        return jsonify({'error': '请求数据为空'}), 400
+    
+    user_id = data.get('user_id')
+    from_user_id = data.get('from_user_id')
+    
+    print(f"DEBUG: user_id = {user_id}, from_user_id = {from_user_id}")
+    
+    # 修复参数验证 - 使用更宽松的验证
+    if not user_id or not from_user_id:
+        print(f"DEBUG: 参数验证失败 - user_id: '{user_id}', from_user_id: '{from_user_id}'")
+        return jsonify({'error': '缺少必要参数'}), 400
+    
+    # 检查用户是否存在
+    if user_id not in users:
+        print(f"DEBUG: 用户不存在 - {user_id}")
+        return jsonify({'error': '用户不存在'}), 404
+        
+    if from_user_id not in users:
+        print(f"DEBUG: 申请者不存在 - {from_user_id}")
+        return jsonify({'error': '申请者不存在'}), 404
+        
+    # 查找并移除情侣申请
+    request_found = False
+    if user_id in couple_requests:
+        for i, request_data in enumerate(couple_requests[user_id]):
+            if request_data['from_user_id'] == from_user_id:
+                couple_requests[user_id].pop(i)
+                request_found = True
+                print(f"DEBUG: 找到并移除情侣申请")
+                break
+                
+    if not request_found:
+        print(f"DEBUG: 未找到情侣申请 - user_id: {user_id}, from_user_id: {from_user_id}")
+        print(f"DEBUG: 当前情侣申请列表: {couple_requests}")
+        return jsonify({'error': '未找到情侣申请'}), 404
+        
+    # 建立情侣关系
+    couples[user_id] = from_user_id
+    couples[from_user_id] = user_id
+    print(f"DEBUG: 建立情侣关系成功")
+    
+    # 发送接受通知
+    message_data = {
+        'type': 'couple_accepted',
+        'from_user_id': user_id,
+        'from_user_name': users[user_id]['user_name'],
+        'message': '已接受你的情侣申请',
+        'timestamp': time.time()
+    }
+    
+    messages[from_user_id].append(message_data)
+    print(f"DEBUG: 发送情侣接受通知成功")
+    
+    return jsonify({'message': '情侣申请接受成功'})
+
+@app.route('/reject_couple_request', methods=['POST'])
+def reject_couple_request():
+    """拒绝情侣申请 - 修复版本"""
+    data = request.json
+    print(f"DEBUG: 接收到的拒绝情侣申请数据: {data}")
+    
+    # 检查数据是否为None
+    if data is None:
+        print("DEBUG: 请求数据为空")
+        return jsonify({'error': '请求数据为空'}), 400
+    
+    user_id = data.get('user_id')
+    from_user_id = data.get('from_user_id')
+    
+    print(f"DEBUG: user_id = {user_id}, from_user_id = {from_user_id}")
+    
+    # 修复参数验证 - 使用更宽松的验证
+    if not user_id or not from_user_id:
+        print(f"DEBUG: 参数验证失败 - user_id: '{user_id}', from_user_id: '{from_user_id}'")
+        return jsonify({'error': '缺少必要参数'}), 400
+    
+    # 检查用户是否存在
+    if user_id not in users:
+        print(f"DEBUG: 用户不存在 - {user_id}")
+        return jsonify({'error': '用户不存在'}), 404
+        
+    if from_user_id not in users:
+        print(f"DEBUG: 申请者不存在 - {from_user_id}")
+        return jsonify({'error': '申请者不存在'}), 404
+        
+    # 查找并移除情侣申请
+    request_found = False
+    if user_id in couple_requests:
+        for i, request_data in enumerate(couple_requests[user_id]):
+            if request_data['from_user_id'] == from_user_id:
+                couple_requests[user_id].pop(i)
+                request_found = True
+                print(f"DEBUG: 找到并移除情侣申请")
+                break
+                
+    if not request_found:
+        print(f"DEBUG: 未找到情侣申请 - user_id: {user_id}, from_user_id: {from_user_id}")
+        return jsonify({'error': '未找到情侣申请'}), 404
+        
+    # 发送拒绝通知
+    message_data = {
+        'type': 'couple_rejected',
+        'from_user_id': user_id,
+        'from_user_name': users[user_id]['user_name'],
+        'message': '已拒绝你的情侣申请',
+        'timestamp': time.time()
+    }
+    
+    messages[from_user_id].append(message_data)
+    print(f"DEBUG: 发送情侣拒绝通知成功")
+    
+    return jsonify({'message': '情侣申请拒绝成功'})
 
 @app.route('/friends', methods=['GET'])
 def get_friends():
@@ -156,14 +392,67 @@ def get_friends():
     if user_id not in users:
         return jsonify({'error': '用户不存在'}), 404
         
-    friends_list = []
+    friend_list = []
     for friend_id in friends[user_id]:
         if friend_id in users:
-            friend_data = users[friend_id].copy()
-            friend_data.pop('last_seen', None)
-            friends_list.append(friend_data)
+            friend_list.append({
+                'user_id': friend_id,
+                'user_name': users[friend_id]['user_name'],
+                'online': users[friend_id]['online']
+            })
             
-    return jsonify({'friends': friends_list})
+    return jsonify({'friends': friend_list})
+
+@app.route('/couple_status', methods=['GET'])
+def get_couple_status():
+    """获取情侣状态"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少用户ID'}), 400
+        
+    if user_id not in users:
+        return jsonify({'error': '用户不存在'}), 404
+        
+    if user_id in couples:
+        partner_id = couples[user_id]
+        if partner_id in users:
+            return jsonify({
+                'has_couple': True,
+                'partner': {
+                    'user_id': partner_id,
+                    'user_name': users[partner_id]['user_name'],
+                    'online': users[partner_id]['online']
+                }
+            })
+    
+    return jsonify({'has_couple': False})
+
+@app.route('/couple_requests', methods=['GET'])
+def get_couple_requests():
+    """获取情侣申请列表"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少用户ID'}), 400
+        
+    if user_id not in users:
+        return jsonify({'error': '用户不存在'}), 404
+        
+    return jsonify({'requests': couple_requests[user_id]})
+
+@app.route('/friend_requests', methods=['GET'])
+def get_friend_requests():
+    """获取好友申请列表"""
+    user_id = request.args.get('user_id')
+    
+    if not user_id:
+        return jsonify({'error': '缺少用户ID'}), 400
+        
+    if user_id not in users:
+        return jsonify({'error': '用户不存在'}), 404
+        
+    return jsonify({'requests': friend_requests[user_id]})
 
 @app.route('/friends_status', methods=['GET'])
 def get_friends_status():
@@ -173,14 +462,19 @@ def get_friends_status():
     if not user_id:
         return jsonify({'error': '缺少用户ID'}), 400
         
-    friends_status = {}
+    if user_id not in users:
+        return jsonify({'error': '用户不存在'}), 404
+        
+    status_list = []
     for friend_id in friends[user_id]:
         if friend_id in users:
-            # 30秒内活跃视为在线
-            online = time.time() - users[friend_id]['last_seen'] < 30
-            friends_status[friend_id] = online
+            status_list.append({
+                'user_id': friend_id,
+                'user_name': users[friend_id]['user_name'],
+                'online': users[friend_id]['online']
+            })
             
-    return jsonify({'friends_status': friends_status})
+    return jsonify({'friends': status_list})
 
 @app.route('/send', methods=['POST'])
 def send_message():
@@ -189,48 +483,52 @@ def send_message():
     user_id = data.get('user_id')
     message_type = data.get('type')
     target_user_id = data.get('target_user_id')
+    message_content = data.get('message', '')
     
     if not all([user_id, message_type]):
         return jsonify({'error': '缺少必要参数'}), 400
         
+    if user_id not in users:
+        return jsonify({'error': '用户不存在'}), 404
+        
     # 创建消息
-    message = {
+    message_data = {
         'type': message_type,
-        'user_id': user_id,
-        'timestamp': time.time(),
-        **data
+        'from_user_id': user_id,
+        'from_user_name': users[user_id]['user_name'],
+        'message': message_content,
+        'timestamp': time.time()
     }
     
-    if target_user_id:
-        # 发送给特定用户
-        if target_user_id in friends[user_id]:
-            messages[target_user_id].append(message)
+    # 如果有目标用户，发送给目标用户
+    if target_user_id and target_user_id in users:
+        messages[target_user_id].append(message_data)
     else:
-        # 发送给所有好友
+        # 否则发送给所有好友
         for friend_id in friends[user_id]:
-            messages[friend_id].append(message)
+            if friend_id in users:
+                messages[friend_id].append(message_data)
     
-    return jsonify({'message': '发送成功'})
+    return jsonify({'message': '消息发送成功'})
 
 @app.route('/messages', methods=['GET'])
 def get_messages():
     """获取消息"""
     user_id = request.args.get('user_id')
-    timestamp = float(request.args.get('timestamp', 0))
+    timestamp = request.args.get('timestamp', 0)
     
     if not user_id:
         return jsonify({'error': '缺少用户ID'}), 400
         
+    if user_id not in users:
+        return jsonify({'error': '用户不存在'}), 404
+        
     # 过滤新消息
-    new_messages = [
-        msg for msg in messages[user_id]
-        if msg['timestamp'] > timestamp
-    ]
-    
-    # 清理旧消息（保留最近50条）
-    if len(messages[user_id]) > 50:
-        messages[user_id] = messages[user_id][-50:]
-    
+    new_messages = []
+    for message in messages[user_id]:
+        if message['timestamp'] > float(timestamp):
+            new_messages.append(message)
+            
     return jsonify({'messages': new_messages})
 
 @app.route('/heartbeat', methods=['POST'])
@@ -239,11 +537,15 @@ def heartbeat():
     data = request.json
     user_id = data.get('user_id')
     
-    if user_id and user_id in users:
+    if not user_id:
+        return jsonify({'error': '缺少用户ID'}), 400
+        
+    if user_id in users:
         users[user_id]['last_seen'] = time.time()
         users[user_id]['online'] = True
-    
-    return jsonify({'message': '心跳成功'})
+        return jsonify({'message': '心跳成功'})
+    else:
+        return jsonify({'error': '用户不存在'}), 404
 
 @app.route('/')
 def home():
@@ -253,10 +555,15 @@ def home():
         'status': 'running',
         'timestamp': datetime.now().isoformat(),
         'users_count': len(users),
-        'version': '2.0.0'
+        'version': '2.1.0',
+        'features': [
+            'user_registration',
+            'friend_requests',
+            'couple_pairing',
+            'messaging',
+            'real_time_status'
+        ]
     })
 
 if __name__ == '__main__':
-    # 获取环境变量中的端口，如果没有则使用10000
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False) 
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000))) 
