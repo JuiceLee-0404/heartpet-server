@@ -89,9 +89,9 @@ def search_user():
         user_data = users[user_id].copy()
         # 不返回敏感信息
         user_data.pop('last_seen', None)
-        return jsonify({'user': user_data})
+        return jsonify({'found': True, 'user': user_data})
     else:
-        return jsonify({'error': '用户不存在'}), 404
+        return jsonify({'found': False, 'error': '用户不存在'}), 404
 
 @app.route('/send_friend_request', methods=['POST'])
 def send_friend_request():
@@ -500,8 +500,17 @@ def send_message():
         'timestamp': time.time()
     }
     
+    # 如果是宠物动作，只发送给情侣伴侣
+    if message_type == 'pet_action':
+        if user_id in couples:
+            partner_id = couples[user_id]
+            if partner_id in users:
+                messages[partner_id].append(message_data)
+                print(f"DEBUG: 宠物动作发送给情侣伴侣 {partner_id}")
+        else:
+            print(f"DEBUG: 用户 {user_id} 没有情侣伴侣，无法发送宠物动作")
     # 如果有目标用户，发送给目标用户
-    if target_user_id and target_user_id in users:
+    elif target_user_id and target_user_id in users:
         messages[target_user_id].append(message_data)
     else:
         # 否则发送给所有好友
@@ -566,4 +575,4 @@ def home():
     })
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000))) 
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5001))) 
